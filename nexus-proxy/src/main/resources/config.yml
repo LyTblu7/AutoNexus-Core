@@ -1,0 +1,33 @@
+ # AutoNexus proxy configuration
+
+redis:
+  # Redis host used for all AutoNexus networking and data
+  host: "127.0.0.1"
+  # Redis TCP port
+  port: 6379
+  # Redis password (leave empty if Redis has no authentication)
+  password: ""
+  # Redis client timeout in milliseconds
+  timeout: 2000
+
+network:
+  # Global namespace for keys and channels (change only if you run multiple networks on one Redis)
+  namespace: "global"
+  # Heartbeat interval in seconds for proxy-side monitoring tasks
+  heartbeat-interval: 5
+  # Time in seconds after which an inactive server is considered offline
+  cleanup-threshold: 15
+
+messages:
+  # Prefix added to all proxy-side AutoNexus messages
+  prefix: "§8[§6AutoNexus§8] "
+  # Message shown after /nexus reload is executed successfully
+  reload-success: "§aNetwork configuration has been reloaded successfully."
+  # Prefix used for global broadcast messages
+  broadcast-prefix: "§8[§4ANNOUNCEMENT§8] §f"
+
+settings:
+  # Default logical group of this proxy instance
+  group: "auto"
+  # Enables verbose debug logging for troubleshooting
+  debug: false

@@ -1,0 +1,85 @@
+# AutoNexus server configuration
+
+# Unique identifier of this Spigot/Paper server in the network
+server-name: "auto"
+
+# Logical group name used for group-targeted commands (e.g. \"group:lobby\")
+group: "default"
+
+redis:
+  # Redis host used for all AutoNexus networking and data
+  host: "127.0.0.1"
+  # Redis TCP port
+  port: 6379
+  # Redis password (leave empty if Redis has no authentication)
+  password: ""
+  # Redis client timeout in milliseconds
+  timeout: 2000
+
+network:
+  # Global namespace for keys and channels (change only if you run multiple networks on one Redis)
+  namespace: "global"
+  # Heartbeat interval in seconds for publishing server status to Redis
+  heartbeat-interval: 5
+  # Time in seconds after which an inactive server is considered offline
+  cleanup-threshold: 15
+
+ux:
+  sounds:
+    # Sound played when a player starts teleporting to another server
+    teleport-start:
+      enabled: true
+      type: "ENTITY_ENDERMAN_TELEPORT"
+      volume: 1.0
+      pitch: 1.2
+    # Sound played when an error occurs (e.g. cooldown, target not found)
+    error:
+      enabled: true
+      type: "ENTITY_VILLAGER_NO"
+      volume: 1.0
+      pitch: 1.0
+
+commands:
+  join:
+    # Enable or disable /nexus join on this server
+    enabled: true
+    # If false, all players can use /nexus join. If true, requires 'autonexus.command.join'
+    require-permission: false
+    # Cooldown in seconds between /nexus join uses per player
+    cooldown: 3
+    # Whether to validate target server availability before teleport
+    validation: true
+  servers:
+    # Enable or disable /nexus servers listing
+    enabled: true
+  find:
+    # Enable or disable /nexus find <player>
+    enabled: true
+  broadcast:
+    # Enable or disable /nexus broadcast <message>
+    enabled: true
+
+messages:
+  # Prefix added to all AutoNexus administrative messages
+  prefix: "§8[§6AutoNexus§8] "
+  # Message shown when a sender does not have permission
+  no-permission: "§cYou do not have permission to use this command."
+  # Message shown when the requested target server is offline or unknown
+  server-not-found: "§cTarget server '%server%' is offline or does not exist."
+  # Message shown to a player when a teleport to another server starts
+  connecting: "§8[§aJoin§8] §7Connecting you to §a%server%§7..."
+  # Message shown after /nexus reload is executed successfully
+  reload-success: "§aNetwork configuration has been reloaded successfully."
+  # Message shown when a player cannot be found on the network
+  player-not-found: "§cPlayer %player% was not found on the network."
+  # Message shown when a player is found and currently online
+  player-found: "§7Player §a%player% §7is currently on server §6%server%§7."
+  # Message shown when /nexus join is still on cooldown
+  cooldown-wait: "§cPlease wait %time% seconds before using this jump again."
+  # Prefix used for global broadcast messages
+  broadcast-prefix: "§8[§4ANNOUNCEMENT§8] §f"
+  # Message shown when an unknown /nexus subcommand is used
+  unknown-command: "§cUnknown subcommand. Use /nexus help."
+
+# Enables verbose debug logging for troubleshooting
+debug: false

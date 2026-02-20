@@ -1,0 +1,9 @@
+{
+  "id": "autonexus",
+  "name": "AutoNexus",
+  "version": "1.0.0",
+  "description": "AutoNexus Proxy Core",
+  "authors": ["lytblu7"],
+  "main": "lytblu7.autonexus.proxy.NexusProxy",
+  "dependencies": []
+}

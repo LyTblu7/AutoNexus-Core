@@ -1,0 +1,24 @@
+[redis]
+host = "127.0.0.1"
+port = 6379
+password = ""
+database = 0
+namespace = "global"
+timeout = 5000
+
+[network]
+heartbeat-interval = 3
+cleanup-threshold = 30
+
+[commands]
+join-validation = true
+
+[messages]
+server-not-found = "§cTarget server '%server%' is offline or does not exist."
+connecting = "§8[§aJoin§8] §7Connecting you to §a%server%§7..."
+no-permission = "§cYou don't have permission to do this."
+reload-success = "§aAutoNexus network configuration reloaded."
+
+[settings]
+group = "auto"
+debug = false

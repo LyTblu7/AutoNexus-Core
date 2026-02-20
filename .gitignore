@@ -1,0 +1,43 @@
+### Java / Maven
+target/
+**/target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+*.zip
+*.tar.gz
+*.rar
+.DS_Store
+
+### IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+
+### VS Code
+.vscode/
+
+### Logs / Dumps / Temp
+*.log
+*.tmp
+hs_err_pid*.log
+replay_pid*.log
+
+### OS / Misc
+Thumbs.db
+*.swp
+*.swo
+
+### Node / Frontend (just in case)
+node_modules/
+dist/
+.parcel-cache/
+.cache/
+
+### Releases (exclude binaries from repo)
+AutoNexus_Release_v1.0/
+AutoNexus_Release_v1.0.zip
+
