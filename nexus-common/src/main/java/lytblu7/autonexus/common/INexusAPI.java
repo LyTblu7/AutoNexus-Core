@@ -76,12 +76,68 @@ public interface INexusAPI {
     
     /**
      * Returns the current server group as seen by the Core.
-     * Default implementation returns "default" for compatibility.
+     * @return The server group name (e.g. "lobby", "survival").
      */
-    default String getServerGroup() {
-        return "default";
+    String getServerGroup();
+
+    /**
+     * Returns the unique name of this server instance.
+     * @return The server name (e.g. "lobby-1", "survival-2").
+     */
+    String getServerName();
+    
+    /**
+     * Checks if this server is in the specified server group.
+     * @param otherGroup The group to check against.
+     * @return true if the server is in the group (case-insensitive).
+     */
+    default boolean isSameGroup(String otherGroup) {
+        if (otherGroup == null) return false;
+        return getServerGroup().equalsIgnoreCase(otherGroup);
+    }
+
+    /**
+     * Retrieves a list of names of all players currently online across the entire network.
+     * @return A future containing the list of player names.
+     */
+    default CompletableFuture<java.util.List<String>> getGlobalPlayerNames() {
+        CompletableFuture<java.util.List<String>> f = new CompletableFuture<>();
+        f.completeExceptionally(new UnsupportedOperationException("getGlobalPlayerNames is not supported on this platform"));
+        return f;
+    }
+
+    /**
+     * Retrieves a list of names of players currently online on servers within the specified group.
+     * @param group The server group to filter by (e.g. "lobby").
+     * @return A future containing the list of player names.
+     */
+    default CompletableFuture<java.util.List<String>> getGroupPlayerNames(String group) {
+        CompletableFuture<java.util.List<String>> f = new CompletableFuture<>();
+        f.completeExceptionally(new UnsupportedOperationException("getGroupPlayerNames is not supported on this platform"));
+        return f;
+    }
+
+    /**
+     * Retrieves a cached list of all global player names.
+     * This method returns immediately with the last known list of players.
+     * The cache is updated asynchronously in the background.
+     * @return A list of player names (may be empty if cache not yet populated).
+     */
+    default java.util.List<String> getCachedGlobalPlayerNames() {
+        return java.util.Collections.emptyList();
     }
     
+    /**
+     * Retrieves a cached list of player names in a specific server group.
+     * This method returns immediately with the last known list of players.
+     * The cache is updated asynchronously in the background.
+     * @param group The server group to filter by.
+     * @return A list of player names (may be empty if cache not yet populated).
+     */
+    default java.util.List<String> getCachedGroupPlayerNames(String group) {
+        return java.util.Collections.emptyList();
+    }
+
     default CompletableFuture<Double> incrementMetadata(UUID uuid, String field, double delta, String reason) {
         CompletableFuture<Double> f = new CompletableFuture<>();
         f.completeExceptionally(new UnsupportedOperationException("incrementMetadata is not supported on this platform"));

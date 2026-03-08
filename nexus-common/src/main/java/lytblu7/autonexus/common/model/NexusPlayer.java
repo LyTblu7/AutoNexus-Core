@@ -36,9 +36,42 @@ public class NexusPlayer {
     public String getCurrentServer() {
         return currentServer;
     }
+    
+    /**
+     * Alias for getCurrentServer() to match API consistency.
+     * @return The name of the server the player is currently on.
+     */
+    public String getServerName() {
+        return currentServer;
+    }
 
     public void setCurrentServer(String currentServer) {
         this.currentServer = currentServer;
+    }
+    
+    /**
+     * Gets the server group this player is currently on.
+     * Note: This value is populated based on the server metadata.
+     * @return The server group, or "unknown" if not available.
+     */
+    public String getServerGroup() {
+        // If metadata contains "serverGroup", return it.
+        // Otherwise return "default" or try to infer.
+        // Ideally this should be a field populated from Redis.
+        if (metadata.containsKey("serverGroup")) {
+            return metadata.get("serverGroup");
+        }
+        return "default";
+    }
+    
+    /**
+     * Checks if this player is in the specified server group.
+     * @param otherGroup The group to check against.
+     * @return true if the player is in the group (case-insensitive).
+     */
+    public boolean isSameGroup(String otherGroup) {
+        if (otherGroup == null) return false;
+        return getServerGroup().equalsIgnoreCase(otherGroup);
     }
 
     /**

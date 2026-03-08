@@ -34,11 +34,18 @@ public class NexusServer extends JavaPlugin implements NexusAPI, INexusAPI {
     private RedisReconnectManager reconnectManager;
     private lytblu7.autonexus.common.meta.MetadataManager metadataManager;
     private final java.util.Set<String> globalPlayersCache = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+    // Store Group -> Set<String> mapping for efficient group lookups
+    private final java.util.Map<String, java.util.Set<String>> groupPlayersCache = new java.util.concurrent.ConcurrentHashMap<>();
 
     @Override
     public void onEnable() {
         NexusAPI.InstanceHolder.set(this);
         NexusProvider.register(this);
+        
+        // Register API immediately so dependent plugins (like NexusChat) can find it
+        // even if Redis connection takes time or fails.
+        getServer().getServicesManager().register(lytblu7.autonexus.common.INexusAPI.class, this, this, ServicePriority.Normal);
+        getLogger().info("[AutoNexus] API Service Registered successfully.");
         
         // Config
         saveDefaultConfig();
@@ -51,7 +58,43 @@ public class NexusServer extends JavaPlugin implements NexusAPI, INexusAPI {
                 ? "redis://:" + pwd + "@" + host + ":" + port
                 : "redis://" + host + ":" + port;
         String serverNameCfg = getConfig().getString("server-name", "auto");
-        this.serverGroup = getConfig().getString("group", "default");
+        String groupCfg = getConfig().getString("group", "default");
+        
+        if ("auto".equalsIgnoreCase(groupCfg)) {
+            // Auto-detect group from server folder name (Current Working Directory)
+            // This is more reliable than traversing getDataFolder() parents which can vary by plugin loader.
+            // Logic:
+            // 1. Get CWD (e.g., F:\Servers\lobby-1)
+            // 2. Extract folder name ("lobby-1")
+            // 3. Strip trailing digits and hyphens ("lobby")
+            try {
+                java.io.File runDir = new java.io.File(".").getCanonicalFile();
+                String folderName = runDir.getName();
+                
+                // Regex: Remove trailing numbers and hyphens (e.g. "lobby-1" -> "lobby", "survival2" -> "survival")
+                // Pattern: -?\d+$ (hyphen optional, digits at end)
+                String detectedGroup = folderName.replaceAll("[-_]?\\d+$", "");
+                
+                if (detectedGroup == null || detectedGroup.isBlank()) {
+                    // Fallback if regex ate everything (e.g. folder was just "1")
+                    detectedGroup = folderName; 
+                }
+                
+                if (detectedGroup != null && !detectedGroup.isBlank()) {
+                    this.serverGroup = detectedGroup;
+                    getLogger().info("[AutoNexus] Auto-detected group: '" + this.serverGroup + "' from folder: '" + folderName + "'");
+                } else {
+                    this.serverGroup = "default";
+                    getLogger().warning("[AutoNexus] Failed to auto-detect group (folder name empty?). Defaulting to 'default'.");
+                }
+            } catch (Exception e) {
+                this.serverGroup = "default";
+                getLogger().warning("[AutoNexus] Failed to auto-detect server group: " + e.getMessage());
+            }
+        } else {
+            this.serverGroup = groupCfg;
+        }
+
         this.redisNamespace = getConfig().getString("network.namespace", "global");
         this.debugLogging = getConfig().getBoolean("debug", false);
         
@@ -78,7 +121,12 @@ public class NexusServer extends JavaPlugin implements NexusAPI, INexusAPI {
                 } catch (Exception ignored) {}
             }, 200L, 600L);
         }
-        fetchGlobalSettings();
+        try {
+            fetchGlobalSettings();
+        } catch (Exception e) {
+            getLogger().warning("[AutoNexus] Failed to fetch global settings (Redis down?): " + e.getMessage());
+        }
+        
         metadataManager = new lytblu7.autonexus.server.meta.ServerMetadataManager(redisManager, this::getServerGroup, getLogger());
         
         // Register Event Listeners
@@ -91,8 +139,7 @@ public class NexusServer extends JavaPlugin implements NexusAPI, INexusAPI {
         getLogger().info("[AutoNexus] Identified as: " + resolvedServerName);
         getLogger().info("[AutoNexus] Registered in group '" + serverGroup + "' (namespace=" + redisNamespace + ").");
         
-        getServer().getServicesManager().register(lytblu7.autonexus.common.INexusAPI.class, this, this, ServicePriority.Normal);
-        
+        // Start Heartbeat Task
         int hbSec = getConfig().getInt("network.heartbeat-interval", 5);
         long periodTicks = Math.max(1, hbSec) * 20L;
         getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
@@ -106,21 +153,47 @@ public class NexusServer extends JavaPlugin implements NexusAPI, INexusAPI {
                 }
             } catch (Throwable ignored) {}
             ServerInfo info = new ServerInfo(resolvedServerName, online, max, tps);
-            if (redisManager != null) {
-                redisManager.setServerHeartbeat(info);
+            if (redisManager != null && redisManager.isConnected()) {
+                try {
+                    redisManager.setServerHeartbeat(info);
+                } catch (Exception e) {
+                     // Ignore heartbeat errors
+                }
             }
         }, 0L, periodTicks);
 
-        // Async refresh of global player cache (every ~4s)
+        getLogger().info("=== STARTING CACHE TIMER ===");
+        // Async refresh of global player cache (every 2s)
         getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
-            if (redisManager instanceof lytblu7.autonexus.server.storage.ServerRedisManager) {
-                java.util.List<String> names = ((lytblu7.autonexus.server.storage.ServerRedisManager) redisManager).getOnlinePlayerNames();
-                globalPlayersCache.clear();
-                if (names != null) {
-                    globalPlayersCache.addAll(names);
+            if (redisManager != null && redisManager.isConnected()) {
+                try {
+                    // 1. Fetch Global List
+                    redisManager.getOnlinePlayerNames().thenAccept(names -> {
+                        if (names != null) {
+                            globalPlayersCache.clear();
+                            globalPlayersCache.addAll(names);
+                            // System.out.println("[AutoNexus-Cache] Updated! Global: " + globalPlayersCache.size());
+                        }
+                    });
+                    
+                    // 2. Fetch Active Groups and their members
+                    redisManager.getActiveGroups().thenAccept(groups -> {
+                        if (groups != null) {
+                            for (String group : groups) {
+                                redisManager.getGroupOnlinePlayers(group).thenAccept(members -> {
+                                    if (members != null) {
+                                        groupPlayersCache.put(group.toLowerCase(), new java.util.concurrent.CopyOnWriteArraySet<>(members));
+                                    }
+                                });
+                            }
+                        }
+                    });
+                    
+                } catch (Exception e) {
+                    System.out.println("[AutoNexus-Cache] Error in task: " + e.getMessage());
                 }
             }
-        }, 0L, 80L);
+        }, 40L, 40L); // Start after 2s, repeat every 2s
     }
 
     public boolean isDebug() {
@@ -132,10 +205,40 @@ public class NexusServer extends JavaPlugin implements NexusAPI, INexusAPI {
         return redisManager;
     }
     
-    public java.util.List<String> getGlobalPlayersCacheSnapshot() {
+    @Override
+    public java.util.List<String> getCachedGlobalPlayerNames() {
         return new java.util.ArrayList<>(globalPlayersCache);
     }
     
+    @Override
+    public java.util.List<String> getCachedGroupPlayerNames(String group) {
+        // Fallback: If we don't have a reliable group cache, we can iterate cached players
+        // and check local cache if we know their group.
+        // But local cache only knows about players who joined THIS server or were loaded.
+        
+        // BETTER: Return empty list if we can't guarantee accuracy, OR return global list
+        // if group is "ALL" or matches current group (approx).
+        
+        // For TabComplete, returning Global list is often acceptable if Group list is unavailable.
+        // But let's try to filter if we have data.
+        
+        if (group == null || "ALL".equalsIgnoreCase(group) || "*".equals(group)) {
+            return getCachedGlobalPlayerNames();
+        }
+        
+        java.util.Set<String> groupSet = groupPlayersCache.get(group.toLowerCase());
+        if (groupSet != null) {
+            return new java.util.ArrayList<>(groupSet);
+        }
+        
+        return java.util.Collections.emptyList();
+    }
+    
+    @Override
+    public String getServerName() {
+        return resolvedServerName;
+    }
+
     @Override
     public String getServerGroup() {
         return serverGroup;
@@ -300,6 +403,25 @@ public class NexusServer extends JavaPlugin implements NexusAPI, INexusAPI {
         if (redisManager != null) {
             redisManager.unregisterMessageListener(channel, listener);
         }
+    }
+
+    @Override
+    public CompletableFuture<java.util.List<String>> getGlobalPlayerNames() {
+        // Use local cache for instant response (User Requirement)
+        // Ensure we return a copy to prevent concurrent modification
+        return CompletableFuture.completedFuture(new java.util.ArrayList<>(globalPlayersCache));
+    }
+
+    @Override
+    public CompletableFuture<java.util.List<String>> getGroupPlayerNames(String group) {
+        // Use local cache for instant response
+        if (group == null) return getGlobalPlayerNames();
+        
+        java.util.Set<String> set = groupPlayersCache.get(group.toLowerCase());
+        if (set != null) {
+            return CompletableFuture.completedFuture(new java.util.ArrayList<>(set));
+        }
+        return CompletableFuture.completedFuture(java.util.Collections.emptyList());
     }
 
     @Override

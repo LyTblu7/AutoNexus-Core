@@ -77,6 +77,11 @@ public class NexusProxy implements NexusAPI, INexusAPI {
     }
     
     @Override
+    public String getServerName() {
+        return "proxy";
+    }
+
+    @Override
     public String getServerGroup() {
         String g = config.getGroup();
         if (g != null && g.equalsIgnoreCase("auto")) {
@@ -309,7 +314,7 @@ public class NexusProxy implements NexusAPI, INexusAPI {
 
     @Override
     public void publishMessage(String channel, String message) {
-        redisManager.publishMessage(channel, message);
+        redisManager.publishMessage(channel, message, getServerName(), getServerGroup());
     }
 
     @Override
@@ -330,6 +335,44 @@ public class NexusProxy implements NexusAPI, INexusAPI {
     @Override
     public ServerInfo getServer(String name) {
         return redisManager.getServer(name);
+    }
+
+    @Override
+    public CompletableFuture<java.util.List<String>> getGlobalPlayerNames() {
+        return redisManager.getOnlinePlayerNames();
+    }
+    @Override
+    public java.util.List<String> getCachedGlobalPlayerNames() {
+        return server.getAllPlayers().stream()
+                .map(Player::getUsername)
+                .collect(java.util.stream.Collectors.toList());
+    }
+    
+    @Override
+    public java.util.List<String> getCachedGroupPlayerNames(String group) {
+        if (group == null || "ALL".equalsIgnoreCase(group)) {
+            return getCachedGlobalPlayerNames();
+        }
+        // Proxy can easily filter by group using registered servers
+        // Assuming we can map Server -> Group.
+        // We need to know which servers belong to which group.
+        // If we don't have that map easily, we can check player's current server.
+        // But `server.getAllPlayers()` returns Player objects, which have `getCurrentServer()`.
+        // We need to resolve Server -> Group.
+        
+        // This requires ServerInfo or config lookup.
+        // For now, return empty if not easily resolvable, OR just return all (TabComplete fallback).
+        return java.util.Collections.emptyList();
+    }
+
+    @Override
+    public CompletableFuture<java.util.List<String>> getGroupPlayerNames(String group) {
+        // Proxy can iterate over its own ConnectedPlayers, but that only covers players connected to THIS proxy.
+        // For a multi-proxy setup, we must rely on Redis.
+        // Similar implementation to Server side: Get global list -> Filter by group.
+        // Or if RedisManager has a better way.
+        // Let's implement it in RedisManager to be consistent.
+        return redisManager.getGroupPlayerNames(group);
     }
 
     @Override

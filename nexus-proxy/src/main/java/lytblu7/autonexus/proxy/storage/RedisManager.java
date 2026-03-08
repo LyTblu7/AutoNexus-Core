@@ -1,30 +1,32 @@
 package lytblu7.autonexus.proxy.storage;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonObject;
-import io.lettuce.core.RedisClient;
-import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
-import io.lettuce.core.pubsub.RedisPubSubListener;
-import io.lettuce.core.api.async.RedisAsyncCommands;
-import lytblu7.autonexus.common.api.NexusMessageListener;
-import lytblu7.autonexus.common.model.ServerInfo;
-import lytblu7.autonexus.common.model.NexusPlayer;
-import lytblu7.autonexus.common.model.NexusProfile;
-import lytblu7.autonexus.common.redis.NexusKeyFactory;
-import lytblu7.autonexus.common.redis.RedisScripts;
-
+import java.util.Collections;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
+import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Logger;
 
-public class RedisManager implements lytblu7.autonexus.common.INexusRedis {
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import io.lettuce.core.RedisClient;
+import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.api.async.RedisAsyncCommands;
+import io.lettuce.core.pubsub.RedisPubSubListener;
+import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
+import lytblu7.autonexus.common.INexusRedis;
+import lytblu7.autonexus.common.api.NexusMessageListener;
+import lytblu7.autonexus.common.model.NexusProfile;
+import lytblu7.autonexus.common.model.NexusPlayer;
+import lytblu7.autonexus.common.redis.NexusKeyFactory;
+import lytblu7.autonexus.common.redis.RedisScripts;
+import lytblu7.autonexus.common.model.ServerInfo;
+
+public class RedisManager implements INexusRedis {
     private RedisClient client;
     private StatefulRedisConnection<String, String> connection;
     private StatefulRedisPubSubConnection<String, String> pubSubConnection;
@@ -39,24 +41,6 @@ public class RedisManager implements lytblu7.autonexus.common.INexusRedis {
     
     private void debugLog(String msg) {
         if (debug) logger.info("[DEBUG] " + msg);
-    }
-
-    // ... (rest of methods)
-
-    @Override
-    public CompletableFuture<String> get(String key) {
-        if (!isConnected) {
-            return CompletableFuture.failedFuture(new IllegalStateException("Redis is not connected"));
-        }
-        return async.get(key).toCompletableFuture();
-    }
-
-    @Override
-    public CompletableFuture<Void> set(String key, String value) {
-        if (!isConnected) {
-            return CompletableFuture.failedFuture(new IllegalStateException("Redis is not connected"));
-        }
-        return async.set(key, value).toCompletableFuture().thenApply(v -> null);
     }
 
     public void registerMessageListener(String channel, NexusMessageListener listener) {
@@ -75,11 +59,13 @@ public class RedisManager implements lytblu7.autonexus.common.INexusRedis {
         }
     }
 
-    public CompletableFuture<Long> publishMessage(String channel, String message) {
+    public CompletableFuture<Long> publishMessage(String channel, String message, String sourceServer, String sourceGroup) {
         JsonObject obj = new JsonObject();
         obj.addProperty("action", "PLUGIN_MESSAGE");
         obj.addProperty("subchannel", channel);
         obj.addProperty("payload", message);
+        obj.addProperty("sourceServer", sourceServer);
+        obj.addProperty("sourceGroup", sourceGroup);
         String json = gson.toJson(obj);
         if (!isConnected) {
             return CompletableFuture.failedFuture(new IllegalStateException("Redis is not connected"));
@@ -102,9 +88,9 @@ public class RedisManager implements lytblu7.autonexus.common.INexusRedis {
             return null;
         }
         String key = "autonexus:server:" + name;
-        String json = connection.sync().get(key);
-        if (json == null) return null;
         try {
+            String json = connection.sync().get(key);
+            if (json == null) return null;
             return gson.fromJson(json, ServerInfo.class);
         } catch (Exception e) {
             return null;
@@ -114,16 +100,20 @@ public class RedisManager implements lytblu7.autonexus.common.INexusRedis {
     public List<ServerInfo> getServers() {
         List<ServerInfo> out = new ArrayList<>();
         if (!isConnected) return out;
-        List<String> keys = connection.sync().keys("autonexus:server:*");
-        if (keys == null) return out;
-        for (String k : keys) {
-            try {
-                String json = connection.sync().get(k);
-                if (json != null) {
-                    ServerInfo info = gson.fromJson(json, ServerInfo.class);
-                    if (info != null) out.add(info);
-                }
-            } catch (Exception ignored) {}
+        try {
+            List<String> keys = connection.sync().keys("autonexus:server:*");
+            if (keys == null) return out;
+            for (String k : keys) {
+                try {
+                    String json = connection.sync().get(k);
+                    if (json != null) {
+                        ServerInfo info = gson.fromJson(json, ServerInfo.class);
+                        if (info != null) out.add(info);
+                    }
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception e) {
+            // ignore
         }
         return out;
     }
@@ -187,16 +177,15 @@ public class RedisManager implements lytblu7.autonexus.common.INexusRedis {
         return async.srem(key, name).toCompletableFuture().thenApply(v -> null);
     }
 
-    public java.util.List<String> getOnlinePlayerNames() {
+    public CompletableFuture<List<String>> getOnlinePlayerNames() {
         if (!isConnected) {
-            return java.util.Collections.emptyList();
+            return CompletableFuture.completedFuture(Collections.emptyList());
         }
         String key = onlinePlayersKey();
-        java.util.Set<String> raw = connection.sync().smembers(key);
-        if (raw == null || raw.isEmpty()) {
-            return java.util.Collections.emptyList();
-        }
-        return new java.util.ArrayList<>(raw);
+        return async.smembers(key).toCompletableFuture().thenApply(set -> {
+            if (set == null || set.isEmpty()) return Collections.emptyList();
+            return new ArrayList<>(set);
+        });
     }
     
     public void setNamespace(String namespace) {
@@ -252,15 +241,9 @@ public class RedisManager implements lytblu7.autonexus.common.INexusRedis {
     }
 
     public CompletableFuture<Void> savePlayer(NexusPlayer player) {
-        // Proxy should NEVER overwrite the full object to avoid data loss (metadata/economy).
-        // This method is now a safe wrapper around updatePlayerLocation.
         return updatePlayerLocation(player.getUuid(), player.getLastSeenName(), player.getCurrentServer());
     }
     
-    /**
-     * Updates specific metadata fields for a player (e.g., balance) safely using Lua.
-     * This merges the provided metadata into the existing metadata map in Redis.
-     */
     public CompletableFuture<Void> updatePlayerMetadata(UUID uuid, Map<String, String> metadataUpdates) {
         if (!isConnected) {
             return CompletableFuture.failedFuture(new IllegalStateException("Redis is not connected"));
@@ -278,35 +261,38 @@ public class RedisManager implements lytblu7.autonexus.common.INexusRedis {
     }
 
     public CompletableFuture<NexusPlayer> loadPlayer(UUID uuid) {
-        if (!isConnected) {
-            return CompletableFuture.failedFuture(new IllegalStateException("Redis is not connected"));
-        }
-
-        NexusKeyFactory keys = NexusKeyFactory.of(namespace);
-        String key = keys.player(uuid);
-        debugLog("GET " + key);
-        return async.get(key).toCompletableFuture().thenApply(json -> {
-            if (json == null) return null;
-            return gson.fromJson(json, NexusPlayer.class);
+        if (!isConnected) return CompletableFuture.completedFuture(null);
+        String key = "autonexus:" + namespace + ":player:" + uuid.toString();
+        
+        return async.hgetall(key).toCompletableFuture().thenApply(data -> {
+            if (data == null || data.isEmpty()) return null;
+            
+            String name = data.get("name");
+            String currentServer = data.get("currentServer");
+            String lastSeenName = data.getOrDefault("lastSeenName", name);
+            
+            NexusPlayer player = new NexusPlayer(uuid, lastSeenName, currentServer);
+            
+            try {
+                String lastSeenStr = data.getOrDefault("lastSeen", "0");
+                if (lastSeenStr != null) player.setMetadata("lastSeen", lastSeenStr);
+            } catch (Exception ignored) {}
+            
+            for (Map.Entry<String, String> entry : data.entrySet()) {
+                 if (entry.getKey().startsWith("meta:")) {
+                     String metaKey = entry.getKey().substring(5);
+                     player.setMetadata(metaKey, entry.getValue());
+                 }
+                 if (entry.getKey().equals("serverGroup")) {
+                     player.setMetadata("serverGroup", entry.getValue());
+                 }
+            }
+            
+            return player;
         });
     }
     
-    public CompletableFuture<UUID> getUuidByName(String name) {
-        if (!isConnected) {
-            return CompletableFuture.failedFuture(new IllegalStateException("Redis is not connected"));
-        }
-        
-        NexusKeyFactory keys = NexusKeyFactory.of(namespace);
-        String nameKey = keys.nameToUuid(name);
-        return async.get(nameKey).toCompletableFuture().thenApply(uuidStr -> {
-            if (uuidStr == null) return null;
-            try {
-                return UUID.fromString(uuidStr);
-            } catch (Exception e) {
-                return null;
-            }
-        });
-    }
+
 
     public CompletableFuture<Void> setPlayerOffline(UUID uuid) {
         if (!isConnected) {
@@ -373,6 +359,11 @@ public class RedisManager implements lytblu7.autonexus.common.INexusRedis {
                 }
             });
         });
+    }
+
+    @Override
+    public CompletableFuture<UUID> getUuidByName(String name) {
+        return getPlayerIdByName(name);
     }
     
     public CompletableFuture<String> incrementMetadataAtomic(UUID uuid, String field, double delta) {
@@ -441,6 +432,37 @@ public class RedisManager implements lytblu7.autonexus.common.INexusRedis {
         return async.lrange(key, 0, count - 1).toCompletableFuture();
     }
     
+    public CompletableFuture<List<String>> getGroupPlayerNames(String group) {
+        return getOnlinePlayerNames().thenCompose(names -> {
+            List<CompletableFuture<String>> futures = new ArrayList<>();
+            for (String name : names) {
+                futures.add(getUuidByName(name).thenCompose(uuid -> {
+                    if (uuid == null) return CompletableFuture.completedFuture(null);
+                    return loadPlayer(uuid).thenApply(p -> {
+                        if (p != null) {
+                            if (p instanceof NexusPlayer) {
+                                if (((NexusPlayer)p).isSameGroup(group)) return name;
+                            } else {
+                                if (p.isSameGroup(group)) return name;
+                            }
+                        }
+                        return null;
+                    });
+                }));
+            }
+            CompletableFuture<?>[] futuresArray = futures.toArray(new CompletableFuture[0]);
+            return CompletableFuture.allOf(futuresArray)
+                    .thenApply(v -> {
+                        List<String> result = new ArrayList<>();
+                        for (CompletableFuture<String> f : futures) {
+                            String n = f.getNow(null);
+                            if (n != null) result.add(n);
+                        }
+                        return result;
+                    });
+        });
+    }
+    
     public CompletableFuture<List<Map<String, Object>>> getBaltop(String group, int offset, int limit) {
         if (!isConnected) {
             return CompletableFuture.failedFuture(new IllegalStateException("Redis is not connected"));
@@ -483,6 +505,22 @@ public class RedisManager implements lytblu7.autonexus.common.INexusRedis {
             return CompletableFuture.failedFuture(new IllegalStateException("Redis is not connected"));
         }
         return async.publish(channel, message).toCompletableFuture();
+    }
+    
+    @Override
+    public CompletableFuture<String> get(String key) {
+        if (!isConnected) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Redis is not connected"));
+        }
+        return async.get(key).toCompletableFuture();
+    }
+
+    @Override
+    public CompletableFuture<Void> set(String key, String value) {
+        if (!isConnected) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Redis is not connected"));
+        }
+        return async.set(key, value).toCompletableFuture().thenApply(v -> null);
     }
     
     public boolean isConnected() {

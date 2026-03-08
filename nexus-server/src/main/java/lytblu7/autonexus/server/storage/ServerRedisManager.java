@@ -74,6 +74,11 @@ public class ServerRedisManager implements lytblu7.autonexus.common.INexusRedis 
             });
             pubSubConnection.async().subscribe("autonexus:network");
             logger.info("[AutoNexus] Redis Pub/Sub connected! Listening on 'autonexus:network' (namespace=" + namespace + ")");
+            
+            // Register this group as active
+            if (serverGroup != null && !serverGroup.isEmpty()) {
+                commandConnection.async().sadd("autonexus:active_groups", serverGroup);
+            }
         } catch (Exception e) {
             logger.severe("[AutoNexus] Redis Pub/Sub failed: " + e.getMessage());
         }
@@ -147,35 +152,6 @@ public class ServerRedisManager implements lytblu7.autonexus.common.INexusRedis 
                 return null;
             }
         });
-    }
-
-    private String onlinePlayersKey() {
-        return "autonexus:" + namespace + ":online_players";
-    }
-
-    public java.util.List<String> getOnlinePlayerNames() {
-        if (commandConnection == null) {
-            return java.util.Collections.emptyList();
-        }
-        try {
-            String key = onlinePlayersKey();
-            java.util.Set<String> raw = commandConnection.sync().smembers(key);
-            if (raw == null || raw.isEmpty()) {
-                return java.util.Collections.emptyList();
-            }
-            return new java.util.ArrayList<>(raw);
-        } catch (Exception e) {
-            if (plugin.isDebug()) {
-                plugin.getLogger().warning("[AutoNexus] Redis error while fetching global players, falling back to local list.");
-            }
-            java.util.List<String> fallback = new java.util.ArrayList<>();
-            for (org.bukkit.entity.Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
-                if (p.getName() != null) {
-                    fallback.add(p.getName());
-                }
-            }
-            return fallback;
-        }
     }
 
     public java.util.concurrent.CompletableFuture<java.util.UUID> getPlayerIdByName(String name) {
@@ -270,6 +246,8 @@ public class ServerRedisManager implements lytblu7.autonexus.common.INexusRedis 
         obj.addProperty("action", "PLUGIN_MESSAGE");
         obj.addProperty("subchannel", channel);
         obj.addProperty("payload", message);
+        obj.addProperty("sourceServer", serverName);
+        obj.addProperty("sourceGroup", serverGroup);
         String json = gson.toJson(obj);
         return publish("autonexus:network", json);
     }
@@ -321,6 +299,24 @@ public class ServerRedisManager implements lytblu7.autonexus.common.INexusRedis 
         if (commandConnection == null) return;
         String key = keys.nameToUuid(name);
         commandConnection.async().set(key, uuid.toString());
+    }
+
+    public void addOnlinePlayer(String playerName) {
+        if (commandConnection == null || playerName == null) return;
+        String globalKey = "autonexus:global:online_players";
+        commandConnection.async().sadd(globalKey, playerName);
+        if (serverGroup != null && !serverGroup.isEmpty()) {
+            commandConnection.async().sadd("autonexus:group:" + serverGroup + ":online_players", playerName);
+        }
+    }
+
+    public void removeOnlinePlayer(String playerName) {
+        if (commandConnection == null || playerName == null) return;
+        String globalKey = "autonexus:global:online_players";
+        commandConnection.async().srem(globalKey, playerName);
+        if (serverGroup != null && !serverGroup.isEmpty()) {
+            commandConnection.async().srem("autonexus:group:" + serverGroup + ":online_players", playerName);
+        }
     }
     
     public java.util.concurrent.CompletableFuture<java.util.UUID> getUuidByName(String name) {
@@ -674,6 +670,23 @@ public class ServerRedisManager implements lytblu7.autonexus.common.INexusRedis 
     // Removed handleEcoCommand as it is now handled by Proxy
 
     // Removed duplicate shutdown method
+    
+    public java.util.concurrent.CompletableFuture<java.util.Set<String>> getActiveGroups() {
+        if (commandConnection == null) return java.util.concurrent.CompletableFuture.completedFuture(Collections.emptySet());
+        return commandConnection.async().smembers("autonexus:active_groups").toCompletableFuture();
+    }
+
+    public java.util.concurrent.CompletableFuture<java.util.Set<String>> getGroupOnlinePlayers(String group) {
+        if (commandConnection == null || group == null) return java.util.concurrent.CompletableFuture.completedFuture(Collections.emptySet());
+        return commandConnection.async().smembers("autonexus:group:" + group + ":online_players").toCompletableFuture();
+    }
+
+    public java.util.concurrent.CompletableFuture<java.util.Set<String>> getOnlinePlayerNames() {
+        if (commandConnection == null) return java.util.concurrent.CompletableFuture.completedFuture(java.util.Collections.emptySet());
+        
+        String key = "autonexus:global:online_players";
+        return commandConnection.async().smembers(key).toCompletableFuture();
+    }
     
     // Simple helper class for envelope serialization
     public static class NetworkEnvelope {

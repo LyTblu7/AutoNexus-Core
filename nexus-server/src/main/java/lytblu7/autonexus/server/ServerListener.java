@@ -24,6 +24,8 @@ public class ServerListener implements Listener {
         // 1. Save Name Index for offline lookup (CRITICAL)
         if (plugin.getRedisManager() instanceof ServerRedisManager) {
             ((ServerRedisManager) plugin.getRedisManager()).saveNameMapping(playerName, uuid);
+            // ADDED: Add to global online players set for TabComplete
+            ((ServerRedisManager) plugin.getRedisManager()).addOnlinePlayer(playerName);
         }
         
         // 2. Async load from Redis
@@ -37,31 +39,26 @@ public class ServerListener implements Listener {
             if (nexusPlayer == null) {
                  // CASE 1: New Player (Never joined network before)
                  nexusPlayer = new lytblu7.autonexus.common.model.NexusPlayer(uuid, playerName, plugin.getResolvedServerName());
+                 nexusPlayer.setMetadata("serverGroup", plugin.getServerGroup());
                  plugin.getLogger().info("[AutoNexus] Created NEW NexusPlayer data for " + playerName);
                  // Only save if it's a NEW player to initialize their record
                  plugin.savePlayer(nexusPlayer);
             } else {
                  // CASE 2: Existing Player (Has Redis data)
-                 // CRITICAL: Do NOT create a new object. Use the one from Redis to preserve metadata (money, rank, etc.)
-                 // We only update the 'currentServer' field and 'lastSeenName'
+                 // FORCE UPDATE local session data to ensure Redis knows where they are
                  nexusPlayer.setCurrentServer(plugin.getResolvedServerName());
                  nexusPlayer.setLastSeenName(playerName);
+                 nexusPlayer.setMetadata("serverGroup", plugin.getServerGroup());
                  
-                 // CRITICAL: Do NOT call savePlayer() immediately if we want to be 100% safe against race conditions.
-                 // However, we DO want to update the 'currentServer' location.
-                 // The race condition happens if we overwrite metadata with STALE local data.
-                 // Since 'nexusPlayer' here IS the Redis data (fetched 1ms ago), it is safe to save it back 
-                 // *provided* we didn't wipe the metadata map.
-                 // Since we are modifying the SAME object we fetched, metadata is preserved.
+                 // CRITICAL: We MUST save this session update immediately so Proxy/other servers know 
+                 // the player is here (for PMs, strict isolation, etc.)
+                 // Since we just fetched this object from Redis (nexusPlayer is fresh), 
+                 // saving it back is safe and won't overwrite metadata with stale local state.
+                 plugin.savePlayer(nexusPlayer);
                  
-                 // BUT, the user explicitly said: "ON JOIN: Do NOT call 'api.savePlayer()' immediately."
-                 // "Instead, ONLY call 'api.getPlayer(uuid)' to FETCH the latest data... Update the local metadata map"
-                 
-                 // If we don't save, the Proxy won't know they are on this server until some other update happens.
-                 // But maybe that's acceptable for now to solve the money wipe bug.
-                 // Let's comment out the save for existing players as per strict instruction.
-                // plugin.savePlayer(nexusPlayer); 
-                 
+                 plugin.getLogger().info("[AutoNexus] Updated session for " + playerName + ": Server=" + plugin.getResolvedServerName() + ", Group=" + plugin.getServerGroup());
+
+                 // Debug logging for balances
                 java.util.Map<String, String> meta = nexusPlayer.getMetadata();
                 plugin.getLogger().info("[AutoNexus] Loaded existing data for " + playerName + " metadata=" + meta);
                 StringBuilder balances = new StringBuilder();
@@ -99,6 +96,8 @@ public class ServerListener implements Listener {
         }
         if (plugin.getRedisManager() instanceof ServerRedisManager) {
             ((ServerRedisManager) plugin.getRedisManager()).setPlayerOffline(uuid);
+            // ADDED: Remove from global online players set
+            ((ServerRedisManager) plugin.getRedisManager()).removeOnlinePlayer(event.getPlayer().getName());
         }
     }
 

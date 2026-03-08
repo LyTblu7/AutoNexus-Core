@@ -321,7 +321,7 @@ public class NexusCommand implements CommandExecutor, TabCompleter {
                 if (!hasAdmin(sender)) {
                     return Collections.emptyList();
                 }
-                List<String> names = plugin.getGlobalPlayersCacheSnapshot();
+                List<String> names = plugin.getCachedGlobalPlayerNames();
                 if (names == null) names = new ArrayList<>();
                 StringUtil.copyPartialMatches(token, names, suggestions);
                 if (plugin.isDebug()) {
